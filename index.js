@@ -1,6 +1,9 @@
 const express = require("express");
 const cors = require("cors");
 const { pool, testConnection } = require("./config/db");
+require("dotenv").config();
+const jwt = require("jsonwebtoken");
+const { authenticateToken } = require("./middleware/auth");
 
 const app = express();
 const port = 3000;
@@ -18,16 +21,31 @@ app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const [rows] = await pool.execute("SELECT id, nombre, apellido, email, rol FROM usuarios WHERE email = ? AND password = ?", [email, password]);
+    const [rows] = await pool.execute("SELECT * FROM usuarios WHERE email = ?", [email]);
     if (rows.length === 0) return res.status(401).json({ error: "Email o contraseña incorrectos" });
-    res.json({ usuario: rows[0] });
+
+    const user = rows[0];
+    const isValidPassword = password === user.password; // contrasenas hasheadas luego
+
+    if (!isValidPassword) return res.status(401).json({ error: "Email o contraseña incorrectos" });
+
+    // Generar token
+    const token = jwt.sign(
+      { id: user.id, email: user.email, rol: user.rol },
+      process.env.JWT_SECRET,
+      { expiresIn: process.env.JWT_EXPIRES_IN }
+    );
+
+    // Devolver usuario sin contraseña + token
+    const { password: _, ...userWithoutPassword } = user;
+    res.json({usuario: userWithoutPassword, token});
   } catch (error) {
     console.error("Error en login:", error);
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
-app.post("/register", async (req, res) => {
+app.post("/register", authenticateToken, async (req, res) => {
   const { email, password, nombre, apellido, telefono } = req.body;
 
   try {
@@ -52,7 +70,7 @@ app.post("/register", async (req, res) => {
 // --------------------- ENDPOINTS DE USUARIOS ---------------------
 
 
-app.get("/usuarios", async (req, res) => {
+app.get("/usuarios", authenticateToken, async (req, res) => {
   try {
     // desestructuro las rows de cada query
     const [rows] = await pool.execute("SELECT * FROM usuarios");
@@ -63,7 +81,7 @@ app.get("/usuarios", async (req, res) => {
   }
 });
 
-app.get("/usuarios/:id", async (req, res) => {
+app.get("/usuarios/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const [rows] = await pool.execute("SELECT * FROM usuarios WHERE id = ?", [id]);
@@ -75,7 +93,7 @@ app.get("/usuarios/:id", async (req, res) => {
   }
 });
 
-app.post("/usuarios", async (req, res) => {
+app.post("/usuarios", authenticateToken, async (req, res) => {
   const { nombre, apellido, email, telefono, password, rol } = req.body;
   try {
     const [result] = await pool.execute(
@@ -91,41 +109,41 @@ app.post("/usuarios", async (req, res) => {
 });
 
 
-app.put('/usuarios/:id', async (req, res) => {
+app.put("/usuarios/:id", authenticateToken, async (req, res) => {
   // actualizar usuario desde admin panel
   const { id } = req.params;
   const { nombre, apellido, email, telefono, password, rol } = req.body;
   
   try {
     const [result] = await pool.execute(
-      'UPDATE usuarios SET nombre = ?, apellido = ?, email = ?, telefono = ?, password = ?, rol = ? WHERE id = ?',
+      "UPDATE usuarios SET nombre = ?, apellido = ?, email = ?, telefono = ?, password = ?, rol = ? WHERE id = ?",
       [nombre, apellido, email, telefono, password, rol, id]
     );
     
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Usuario no encontrado" });
     
-    res.json({ mensaje: 'Usuario actualizado exitosamente' });
+    res.json({ mensaje: "Usuario actualizado exitosamente" });
   } catch (error) {
-    console.error('Error al actualizar usuario:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error al actualizar usuario:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
-app.delete('/usuarios/:id', async (req, res) => {
+app.delete("/usuarios/:id", authenticateToken, async (req, res) => {
   // eliminar usuario específico
   const { id } = req.params;
   
   try {
-    const [result] = await pool.execute('DELETE FROM usuarios WHERE id = ?', [id]);
+    const [result] = await pool.execute("DELETE FROM usuarios WHERE id = ?", [id]);
     
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
+      return res.status(404).json({ error: "Usuario no encontrado" });
     }
     
-    res.json({ mensaje: 'Usuario eliminado exitosamente' });
+    res.json({ mensaje: "Usuario eliminado exitosamente" });
   } catch (error) {
-    console.error('Error al eliminar usuario:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error al eliminar usuario:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
@@ -133,7 +151,7 @@ app.delete('/usuarios/:id', async (req, res) => {
 // --------------------- ENDPOINTS DE PROPIEDADES ---------------------
 
 
-app.get("/propiedades", async (req, res) => {
+app.get("/propiedades", authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT p.*, t.tipo, u.ciudad, u.provincia, 
@@ -149,7 +167,7 @@ app.get("/propiedades", async (req, res) => {
   }
 });
 
-app.get("/propiedades/destacadas", async (req, res) => {
+app.get("/propiedades/destacadas", authenticateToken, async (req, res) => {
   try {
     const [rows] = await pool.execute(
       `SELECT p.*, t.tipo, u.ciudad, u.provincia, 
@@ -166,7 +184,7 @@ app.get("/propiedades/destacadas", async (req, res) => {
   }
 });
 
-app.post("/propiedades", async (req, res) => {
+app.post("/propiedades", authenticateToken, async (req, res) => {
   const { titulo, descripcion, precio, superficie, tipo, habitaciones, banos, ubicacion, url_imagen, usuario_id, destacada } = req.body;
 
   try {
@@ -196,7 +214,7 @@ app.post("/propiedades", async (req, res) => {
   }
 });
 
-app.get("/propiedades/:id", async (req, res) => {
+app.get("/propiedades/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
   try {
     const [rows] = await pool.execute(
@@ -209,9 +227,7 @@ app.get("/propiedades/:id", async (req, res) => {
       [id]
     );
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: "Propiedad no encontrada" });
-    }
+    if (rows.length === 0) return res.status(404).json({ error: "Propiedad no encontrada" });
 
     res.json(rows[0]);
   } catch (error) {
@@ -220,7 +236,7 @@ app.get("/propiedades/:id", async (req, res) => {
   }
 });
 
-app.get("/propiedades/usuario/:usuario_id", async (req, res) => {
+app.get("/propiedades/usuario/:usuario_id", authenticateToken, async (req, res) => {
   //propiedades de un usuario específico
   const { usuario_id } = req.params;
   
@@ -243,7 +259,7 @@ app.get("/propiedades/usuario/:usuario_id", async (req, res) => {
 });
 
 
-app.put('/propiedades/:id', async (req, res) => {
+app.put("/propiedades/:id", authenticateToken, async (req, res) => {
   // actualizar propiedad desde admin panel
   const { id } = req.params;
   const { titulo, descripcion, precio, superficie, habitaciones, banos, tipo, ubicacion, url_imagen } = req.body;
@@ -266,41 +282,34 @@ app.put('/propiedades/:id', async (req, res) => {
     
     //actualizar propiedad
     const [result] = await pool.execute(
-      'UPDATE propiedades SET titulo = ?, descripcion = ?, precio = ?, superficie = ?, habitaciones = ?, banos = ?, tipo_id = ?, ubicacion_id = ? WHERE id = ?',
+      "UPDATE propiedades SET titulo = ?, descripcion = ?, precio = ?, superficie = ?, habitaciones = ?, banos = ?, tipo_id = ?, ubicacion_id = ? WHERE id = ?",
       [titulo, descripcion, precio, superficie, habitaciones, banos, tipoRows[0].id, ubicacion_id, id]
     );
     
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Propiedad no encontrada' });
-    }
-    
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Propiedad no encontrada" });
     //actualizar imagen si se proporciona
-    if (url_imagen) {
-      await pool.execute('UPDATE imagenes_propiedad SET url_imagen = ? WHERE propiedad_id = ?', [url_imagen, id]);
-    }
+    if (url_imagen) await pool.execute("UPDATE imagenes_propiedad SET url_imagen = ? WHERE propiedad_id = ?", [url_imagen, id]);
     
-    res.json({ mensaje: 'Propiedad actualizada exitosamente' });
+    res.json({ mensaje: "Propiedad actualizada exitosamente" });
   } catch (error) {
-    console.error('Error al actualizar propiedad:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error al actualizar propiedad:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
-app.delete('/propiedades/:id', async (req, res) => {
+app.delete("/propiedades/:id", authenticateToken, async (req, res) => {
   // eliminar propiedad específica
   const { id } = req.params;
   
   try {
-    const [result] = await pool.execute('DELETE FROM propiedades WHERE id = ?', [id]);
+    const [result] = await pool.execute("DELETE FROM propiedades WHERE id = ?", [id]);
     
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Propiedad no encontrada' });
-    }
+    if (result.affectedRows === 0) return res.status(404).json({ error: "Propiedad no encontrada" });
     
-    res.json({ mensaje: 'Propiedad eliminada exitosamente' });
+    res.json({ mensaje: "Propiedad eliminada exitosamente" });
   } catch (error) {
-    console.error('Error al eliminar propiedad:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error al eliminar propiedad:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
@@ -308,7 +317,7 @@ app.delete('/propiedades/:id', async (req, res) => {
 // --------------------- ENDPOINTS DE PUBLICACIONES FAVORITAS ---------------------
 
 
-app.get("/favoritos/:usuario_id", async (req, res) => {
+app.get("/favoritos/:usuario_id", authenticateToken, async (req, res) => {
   const { usuario_id } = req.params;
 
   try {
@@ -323,7 +332,7 @@ app.get("/favoritos/:usuario_id", async (req, res) => {
   }
 });
 
-app.post("/favoritos", async (req, res) => {
+app.post("/favoritos", authenticateToken, async (req, res) => {
   const { usuario_id, propiedad_id } = req.body;
 
   try {
@@ -345,7 +354,7 @@ app.post("/favoritos", async (req, res) => {
   }
 });
 
-app.get("/favoritos/:usuario_id/:propiedad_id", async (req, res) => {
+app.get("/favoritos/:usuario_id/:propiedad_id", authenticateToken, async (req, res) => {
   const { usuario_id, propiedad_id } = req.params;
 
   try {
@@ -365,36 +374,36 @@ app.get("/favoritos/:usuario_id/:propiedad_id", async (req, res) => {
 // --------------------- ADMIN PANEL - RESETEAR TODOS LOS VALORES GUARDADOS ---------------------
 
 
-app.delete('/resetAll', async (req, res) => {
+app.delete("/resetAll", authenticateToken, async (req, res) => {
   // resetear toda la base de datos en el admin panel
   try {
     //deshabilita temporalmente las foreign key checks para evitar errores
-    await pool.execute('SET FOREIGN_KEY_CHECKS = 0');
+    await pool.execute("SET FOREIGN_KEY_CHECKS = 0");
     // Eliminar todos los datos de todas las tablas
-    await pool.execute('DELETE FROM favoritos');
-    await pool.execute('DELETE FROM reservas');
-    await pool.execute('DELETE FROM ventas');
-    await pool.execute('DELETE FROM imagenes_propiedad');
-    await pool.execute('DELETE FROM propiedades');
-    await pool.execute('DELETE FROM agentes');
-    await pool.execute('DELETE FROM usuarios');
-    await pool.execute('DELETE FROM ubicaciones');
+    await pool.execute("DELETE FROM favoritos");
+    await pool.execute("DELETE FROM reservas");
+    await pool.execute("DELETE FROM ventas");
+    await pool.execute("DELETE FROM imagenes_propiedad");
+    await pool.execute("DELETE FROM propiedades");
+    await pool.execute("DELETE FROM agentes");
+    await pool.execute("DELETE FROM usuarios");
+    await pool.execute("DELETE FROM ubicaciones");
     // Reiniciar los AUTO_INCREMENT para que los IDs vuelvan a empezar desde 1
-    await pool.execute('ALTER TABLE usuarios AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE agentes AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE ubicaciones AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE propiedades AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE imagenes_propiedad AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE favoritos AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE reservas AUTO_INCREMENT = 1');
-    await pool.execute('ALTER TABLE ventas AUTO_INCREMENT = 1');
+    await pool.execute("ALTER TABLE usuarios AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE agentes AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE ubicaciones AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE propiedades AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE imagenes_propiedad AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE favoritos AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE reservas AUTO_INCREMENT = 1");
+    await pool.execute("ALTER TABLE ventas AUTO_INCREMENT = 1");
     // Reactivar las foreign key checks
-    await pool.execute('SET FOREIGN_KEY_CHECKS = 1');
+    await pool.execute("SET FOREIGN_KEY_CHECKS = 1");
 
-    res.json({ mensaje: 'Toda la base de datos ha sido reseteada exitosamente' });
+    res.json({ mensaje: "Toda la base de datos ha sido reseteada exitosamente" });
   } catch (error) {
-    console.error('Error al resetear base de datos:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
+    console.error("Error al resetear base de datos:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
