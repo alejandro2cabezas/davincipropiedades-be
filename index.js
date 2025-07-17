@@ -4,11 +4,15 @@ const { pool, testConnection } = require("./config/db");
 
 const app = express();
 const port = 3000;
-
+// agrego mi localhost de vite con react
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
 
 testConnection();
+
+
+// --------------------- ENDPOINTS DE LOGEO Y REGISTRO ---------------------
+
 
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
@@ -43,6 +47,10 @@ app.post("/register", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
+
+// --------------------- ENDPOINTS DE USUARIOS ---------------------
+
 
 app.get("/usuarios", async (req, res) => {
   try {
@@ -81,6 +89,49 @@ app.post("/usuarios", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
+
+app.put('/usuarios/:id', async (req, res) => {
+  // actualizar usuario desde admin panel
+  const { id } = req.params;
+  const { nombre, apellido, email, telefono, password, rol } = req.body;
+  
+  try {
+    const [result] = await pool.execute(
+      'UPDATE usuarios SET nombre = ?, apellido = ?, email = ?, telefono = ?, password = ?, rol = ? WHERE id = ?',
+      [nombre, apellido, email, telefono, password, rol, id]
+    );
+    
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+    
+    res.json({ mensaje: 'Usuario actualizado exitosamente' });
+  } catch (error) {
+    console.error('Error al actualizar usuario:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.delete('/usuarios/:id', async (req, res) => {
+  // eliminar usuario específico
+  const { id } = req.params;
+  
+  try {
+    const [result] = await pool.execute('DELETE FROM usuarios WHERE id = ?', [id]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    
+    res.json({ mensaje: 'Usuario eliminado exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar usuario:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+// --------------------- ENDPOINTS DE PROPIEDADES ---------------------
+
 
 app.get("/propiedades", async (req, res) => {
   try {
@@ -169,8 +220,8 @@ app.get("/propiedades/:id", async (req, res) => {
   }
 });
 
-// Endpoint para obtener propiedades de un usuario específico
 app.get("/propiedades/usuario/:usuario_id", async (req, res) => {
+  //propiedades de un usuario específico
   const { usuario_id } = req.params;
   
   try {
@@ -190,6 +241,72 @@ app.get("/propiedades/usuario/:usuario_id", async (req, res) => {
     res.status(500).json({ error: "Error interno del servidor" });
   }
 });
+
+
+app.put('/propiedades/:id', async (req, res) => {
+  // actualizar propiedad desde admin panel
+  const { id } = req.params;
+  const { titulo, descripcion, precio, superficie, habitaciones, banos, tipo, ubicacion, url_imagen } = req.body;
+  
+  try {
+    // obtener tipo_id
+    const [tipoRows] = await pool.execute("SELECT id FROM tipos_propiedad WHERE tipo = ?", [tipo]);
+    if (tipoRows.length === 0) return res.status(400).json({ error: "Tipo de propiedad no válido" });
+    
+    // obtener o crear ubicacion_id
+    let ubicacion_id;
+    const [ubicacionRows] = await pool.execute("SELECT id FROM ubicaciones WHERE ciudad = ?", [ubicacion]);
+    
+    if (ubicacionRows.length === 0) {
+      const [result] = await pool.execute("INSERT INTO ubicaciones (ciudad, provincia) VALUES (?, ?)", [ubicacion, "Buenos Aires"]);
+      ubicacion_id = result.insertId;
+    } else {
+      ubicacion_id = ubicacionRows[0].id;
+    }
+    
+    //actualizar propiedad
+    const [result] = await pool.execute(
+      'UPDATE propiedades SET titulo = ?, descripcion = ?, precio = ?, superficie = ?, habitaciones = ?, banos = ?, tipo_id = ?, ubicacion_id = ? WHERE id = ?',
+      [titulo, descripcion, precio, superficie, habitaciones, banos, tipoRows[0].id, ubicacion_id, id]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Propiedad no encontrada' });
+    }
+    
+    //actualizar imagen si se proporciona
+    if (url_imagen) {
+      await pool.execute('UPDATE imagenes_propiedad SET url_imagen = ? WHERE propiedad_id = ?', [url_imagen, id]);
+    }
+    
+    res.json({ mensaje: 'Propiedad actualizada exitosamente' });
+  } catch (error) {
+    console.error('Error al actualizar propiedad:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+app.delete('/propiedades/:id', async (req, res) => {
+  // eliminar propiedad específica
+  const { id } = req.params;
+  
+  try {
+    const [result] = await pool.execute('DELETE FROM propiedades WHERE id = ?', [id]);
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: 'Propiedad no encontrada' });
+    }
+    
+    res.json({ mensaje: 'Propiedad eliminada exitosamente' });
+  } catch (error) {
+    console.error('Error al eliminar propiedad:', error);
+    res.status(500).json({ error: 'Error interno del servidor' });
+  }
+});
+
+
+// --------------------- ENDPOINTS DE PUBLICACIONES FAVORITAS ---------------------
+
 
 app.get("/favoritos/:usuario_id", async (req, res) => {
   const { usuario_id } = req.params;
@@ -245,13 +362,14 @@ app.get("/favoritos/:usuario_id/:propiedad_id", async (req, res) => {
 });
 
 
+// --------------------- ADMIN PANEL - RESETEAR TODOS LOS VALORES GUARDADOS ---------------------
 
-// Endpoint para resetear toda la base de datos
+
 app.delete('/resetAll', async (req, res) => {
+  // resetear toda la base de datos en el admin panel
   try {
-    // Deshabilitar temporalmente las foreign key checks para evitar errores
+    //deshabilita temporalmente las foreign key checks para evitar errores
     await pool.execute('SET FOREIGN_KEY_CHECKS = 0');
-    
     // Eliminar todos los datos de todas las tablas
     await pool.execute('DELETE FROM favoritos');
     await pool.execute('DELETE FROM reservas');
@@ -261,7 +379,6 @@ app.delete('/resetAll', async (req, res) => {
     await pool.execute('DELETE FROM agentes');
     await pool.execute('DELETE FROM usuarios');
     await pool.execute('DELETE FROM ubicaciones');
-    
     // Reiniciar los AUTO_INCREMENT para que los IDs vuelvan a empezar desde 1
     await pool.execute('ALTER TABLE usuarios AUTO_INCREMENT = 1');
     await pool.execute('ALTER TABLE agentes AUTO_INCREMENT = 1');
@@ -271,10 +388,9 @@ app.delete('/resetAll', async (req, res) => {
     await pool.execute('ALTER TABLE favoritos AUTO_INCREMENT = 1');
     await pool.execute('ALTER TABLE reservas AUTO_INCREMENT = 1');
     await pool.execute('ALTER TABLE ventas AUTO_INCREMENT = 1');
-    
     // Reactivar las foreign key checks
     await pool.execute('SET FOREIGN_KEY_CHECKS = 1');
-    
+
     res.json({ mensaje: 'Toda la base de datos ha sido reseteada exitosamente' });
   } catch (error) {
     console.error('Error al resetear base de datos:', error);
@@ -282,112 +398,6 @@ app.delete('/resetAll', async (req, res) => {
   }
 });
 
+// --------------------- INICIO DE LISTENER ---------------------
 
-
-// Endpoint para actualizar usuario
-app.put('/usuarios/:id', async (req, res) => {
-  const { id } = req.params;
-  const { nombre, apellido, email, telefono, password, rol } = req.body;
-  
-  try {
-    const [result] = await pool.execute(
-      'UPDATE usuarios SET nombre = ?, apellido = ?, email = ?, telefono = ?, password = ?, rol = ? WHERE id = ?',
-      [nombre, apellido, email, telefono, password, rol, id]
-    );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-    
-    res.json({ mensaje: 'Usuario actualizado exitosamente' });
-  } catch (error) {
-    console.error('Error al actualizar usuario:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para actualizar propiedad
-app.put('/propiedades/:id', async (req, res) => {
-  const { id } = req.params;
-  const { titulo, descripcion, precio, superficie, habitaciones, banos, tipo, ubicacion, url_imagen } = req.body;
-  
-  try {
-    // Obtener tipo_id
-    const [tipoRows] = await pool.execute("SELECT id FROM tipos_propiedad WHERE tipo = ?", [tipo]);
-    if (tipoRows.length === 0) return res.status(400).json({ error: "Tipo de propiedad no válido" });
-    
-    // Obtener o crear ubicacion_id
-    let ubicacion_id;
-    const [ubicacionRows] = await pool.execute("SELECT id FROM ubicaciones WHERE ciudad = ?", [ubicacion]);
-    
-    if (ubicacionRows.length === 0) {
-      const [result] = await pool.execute("INSERT INTO ubicaciones (ciudad, provincia) VALUES (?, ?)", [ubicacion, "Buenos Aires"]);
-      ubicacion_id = result.insertId;
-    } else {
-      ubicacion_id = ubicacionRows[0].id;
-    }
-    
-    // Actualizar propiedad
-    const [result] = await pool.execute(
-      'UPDATE propiedades SET titulo = ?, descripcion = ?, precio = ?, superficie = ?, habitaciones = ?, banos = ?, tipo_id = ?, ubicacion_id = ? WHERE id = ?',
-      [titulo, descripcion, precio, superficie, habitaciones, banos, tipoRows[0].id, ubicacion_id, id]
-    );
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Propiedad no encontrada' });
-    }
-    
-    // Actualizar imagen si se proporciona
-    if (url_imagen) {
-      await pool.execute('UPDATE imagenes_propiedad SET url_imagen = ? WHERE propiedad_id = ?', [url_imagen, id]);
-    }
-    
-    res.json({ mensaje: 'Propiedad actualizada exitosamente' });
-  } catch (error) {
-    console.error('Error al actualizar propiedad:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para eliminar usuario específico
-app.delete('/usuarios/:id', async (req, res) => {
-  const { id } = req.params;
-  
-  try {
-    const [result] = await pool.execute('DELETE FROM usuarios WHERE id = ?', [id]);
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Usuario no encontrado' });
-    }
-    
-    res.json({ mensaje: 'Usuario eliminado exitosamente' });
-  } catch (error) {
-    console.error('Error al eliminar usuario:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-// Endpoint para eliminar propiedad específica
-app.delete('/propiedades/:id', async (req, res) => {
-  const { id } = req.params;
-  
-  try {
-    const [result] = await pool.execute('DELETE FROM propiedades WHERE id = ?', [id]);
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Propiedad no encontrada' });
-    }
-    
-    res.json({ mensaje: 'Propiedad eliminada exitosamente' });
-  } catch (error) {
-    console.error('Error al eliminar propiedad:', error);
-    res.status(500).json({ error: 'Error interno del servidor' });
-  }
-});
-
-
-
-
-app.listen(port, () => {
-  console.log(`Servidor corriendo`);
-});
+app.listen(port, () => { console.log(`Servidor corriendo`) });
